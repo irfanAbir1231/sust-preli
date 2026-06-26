@@ -2,22 +2,9 @@
 
 import { useState } from "react";
 import HealthStatus from "@/components/HealthStatus";
-import TransactionRow from "@/components/TransactionRow";
 import AnalysisResult from "@/components/AnalysisResult";
 import { analyzeTicket, AnalysisError } from "@/lib/frontend-api";
-import type {
-  AnalyzeTicketRequest,
-  AnalyzeTicketResponse,
-  TransactionHistoryItem,
-  transactionTypeSchema,
-  transactionStatusSchema,
-} from "@/schemas/apiContract";
-import type { z } from "zod";
-
-type LocalTransactionItem = TransactionHistoryItem & { localTime?: string };
-
-type SampleTransactionType = z.infer<typeof transactionTypeSchema>;
-type SampleTransactionStatus = z.infer<typeof transactionStatusSchema>;
+import type { AnalyzeTicketRequest, AnalyzeTicketResponse } from "@/schemas/apiContract";
 
 type SampleComplaint = {
   id: string;
@@ -28,14 +15,6 @@ type SampleComplaint = {
   channel: string;
   userType: string;
   complaint: string;
-  transactions: Array<{
-    transaction_id: string;
-    localTime: string;
-    type: SampleTransactionType;
-    amount: number;
-    counterparty: string;
-    status: SampleTransactionStatus;
-  }>;
 };
 
 const SAMPLE_COMPLAINTS: SampleComplaint[] = [
@@ -49,24 +28,6 @@ const SAMPLE_COMPLAINTS: SampleComplaint[] = [
     userType: "customer",
     complaint:
       "I paid my electricity bill once, but 850 BDT was deducted twice. Please check and refund the duplicate amount.",
-    transactions: [
-      {
-        transaction_id: "TXN-9821",
-        localTime: "2026-04-13T10:15",
-        type: "payment",
-        amount: 850,
-        counterparty: "DESCO-BILLER",
-        status: "completed",
-      },
-      {
-        transaction_id: "TXN-9822",
-        localTime: "2026-04-13T10:16",
-        type: "payment",
-        amount: 850,
-        counterparty: "DESCO-BILLER",
-        status: "completed",
-      },
-    ],
   },
   {
     id: "wrong_transfer",
@@ -78,24 +39,6 @@ const SAMPLE_COMPLAINTS: SampleComplaint[] = [
     userType: "customer",
     complaint:
       "I sent 5000 taka to a wrong number around 2pm today. The number was supposed to be 01712345678 but I think I typed it wrong. The person isn't responding to my call. Please help me get my money back.",
-    transactions: [
-      {
-        transaction_id: "TXN-9101",
-        localTime: "2026-04-14T14:08",
-        type: "transfer",
-        amount: 5000,
-        counterparty: "+8801719876543",
-        status: "completed",
-      },
-      {
-        transaction_id: "TXN-9087",
-        localTime: "2026-04-13T18:12",
-        type: "cash_in",
-        amount: 10000,
-        counterparty: "AGENT-512",
-        status: "completed",
-      },
-    ],
   },
   {
     id: "payment_failed",
@@ -107,24 +50,6 @@ const SAMPLE_COMPLAINTS: SampleComplaint[] = [
     userType: "customer",
     complaint:
       "I tried to pay 1250 BDT for an order on Daraz at 9pm last night but the payment failed. My bank statement shows the amount was deducted, but I never received any order confirmation and the merchant has no record of my payment.",
-    transactions: [
-      {
-        transaction_id: "TXN-7750",
-        localTime: "2026-04-15T21:04",
-        type: "payment",
-        amount: 1250,
-        counterparty: "DARAZ-MERCHANT-441",
-        status: "failed",
-      },
-      {
-        transaction_id: "TXN-7749",
-        localTime: "2026-04-15T20:58",
-        type: "cash_in",
-        amount: 5000,
-        counterparty: "AGENT-203",
-        status: "completed",
-      },
-    ],
   },
   {
     id: "merchant_settlement",
@@ -136,32 +61,6 @@ const SAMPLE_COMPLAINTS: SampleComplaint[] = [
     userType: "merchant",
     complaint:
       "I run a small clothing shop and accept payments via QueueStorm. I made 3 transactions yesterday totaling 18,400 BDT but the settlement has not arrived in my bank account yet. It has been more than 24 hours. Please release the funds.",
-    transactions: [
-      {
-        transaction_id: "TXN-M-3301",
-        localTime: "2026-04-14T11:22",
-        type: "payment",
-        amount: 6400,
-        counterparty: "CUSTOMER-+8801711122233",
-        status: "completed",
-      },
-      {
-        transaction_id: "TXN-M-3302",
-        localTime: "2026-04-14T13:45",
-        type: "payment",
-        amount: 5200,
-        counterparty: "CUSTOMER-+8801712345678",
-        status: "completed",
-      },
-      {
-        transaction_id: "TXN-M-3303",
-        localTime: "2026-04-14T16:08",
-        type: "payment",
-        amount: 6800,
-        counterparty: "CUSTOMER-+8801719988776",
-        status: "completed",
-      },
-    ],
   },
   {
     id: "phishing",
@@ -173,24 +72,6 @@ const SAMPLE_COMPLAINTS: SampleComplaint[] = [
     userType: "customer",
     complaint:
       "Ami ekjon caller ke amar OTP diye diyechi je amake boleche ami prize paisi. Tarpor amar account theke 7500 taka chole giyeche. Please help, eta fraud hoyeche.",
-    transactions: [
-      {
-        transaction_id: "TXN-FR-5501",
-        localTime: "2026-04-15T12:33",
-        type: "cash_out",
-        amount: 7500,
-        counterparty: "UNKNOWN-WALLET-9981",
-        status: "completed",
-      },
-      {
-        transaction_id: "TXN-5500",
-        localTime: "2026-04-15T12:18",
-        type: "cash_in",
-        amount: 8000,
-        counterparty: "AGENT-077",
-        status: "completed",
-      },
-    ],
   },
 ];
 
@@ -201,7 +82,6 @@ export default function TicketAnalyzer() {
   const [channel, setChannel] = useState("");
   const [userType, setUserType] = useState("");
   const [complaint, setComplaint] = useState("");
-  const [transactions, setTransactions] = useState<LocalTransactionItem[]>([]);
 
   // Validation & Error states
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -211,34 +91,6 @@ export default function TicketAnalyzer() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalyzeTicketResponse | null>(null);
 
-  // Transaction Builders controls
-  const addTransaction = () => {
-    setTransactions((prev) => [
-      ...prev,
-      {
-        transaction_id: `TXN-${Math.floor(1000 + Math.random() * 9000)}`,
-        localTime: "",
-        type: "transfer",
-        amount: undefined,
-        counterparty: "",
-        status: "completed",
-      },
-    ]);
-  };
-
-  const removeTransaction = (index: number) => {
-    setTransactions((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const updateTransaction = (
-    index: number,
-    updatedFields: Partial<LocalTransactionItem>,
-  ) => {
-    setTransactions((prev) =>
-      prev.map((item, i) => (i === index ? { ...item, ...updatedFields } : item)),
-    );
-  };
-
   // Reset Handler
   const resetForm = () => {
     setTicketId("DEMO-001");
@@ -246,7 +98,6 @@ export default function TicketAnalyzer() {
     setChannel("");
     setUserType("");
     setComplaint("");
-    setTransactions([]);
     setValidationError(null);
     setApiError(null);
     setResult(null);
@@ -259,16 +110,6 @@ export default function TicketAnalyzer() {
     setChannel(sample.channel);
     setUserType(sample.userType);
     setComplaint(sample.complaint);
-    setTransactions(
-      sample.transactions.map((tx) => ({
-        transaction_id: tx.transaction_id,
-        localTime: tx.localTime,
-        type: tx.type,
-        amount: tx.amount,
-        counterparty: tx.counterparty,
-        status: tx.status,
-      })),
-    );
     setValidationError(null);
     setApiError(null);
     setResult(null);
@@ -290,28 +131,7 @@ export default function TicketAnalyzer() {
       return;
     }
 
-    // 2. Validate transaction history builders
-    for (let i = 0; i < transactions.length; i++) {
-      const tx = transactions[i]!;
-      if (!tx.transaction_id || !tx.transaction_id.trim()) {
-        setValidationError(`Transaction #${i + 1} is missing a Transaction ID.`);
-        return;
-      }
-      if (!tx.localTime || !tx.localTime.trim()) {
-        setValidationError(`Transaction #${i + 1} is missing a valid date/time.`);
-        return;
-      }
-      if (tx.amount === undefined || isNaN(tx.amount) || tx.amount < 0) {
-        setValidationError(`Transaction #${i + 1} must have a valid non-negative amount.`);
-        return;
-      }
-      if (!tx.counterparty || !tx.counterparty.trim()) {
-        setValidationError(`Transaction #${i + 1} is missing a counterparty.`);
-        return;
-      }
-    }
-
-    // 3. Assemble JSON Payload (omit "Not provided" enums)
+    // 2. Assemble JSON Payload (omit "Not provided" enums)
     const requestPayload: AnalyzeTicketRequest = {
       ticket_id: ticketId.trim(),
       complaint: complaint.trim(),
@@ -321,24 +141,7 @@ export default function TicketAnalyzer() {
     if (channel) requestPayload.channel = channel as any;
     if (userType) requestPayload.user_type = userType as any;
 
-    if (transactions.length > 0) {
-      requestPayload.transaction_history = transactions.map((tx) => {
-        // Convert datetime-local to standard ISO 8601 string
-        const timestamp = tx.localTime ? new Date(tx.localTime).toISOString() : undefined;
-        
-        const historyItem: TransactionHistoryItem = {
-          transaction_id: tx.transaction_id!.trim(),
-          timestamp,
-          type: tx.type,
-          amount: tx.amount,
-          counterparty: tx.counterparty!.trim(),
-          status: tx.status,
-        };
-        return historyItem;
-      });
-    }
-
-    // 4. Send POST request
+    // 3. Send POST request
     setIsAnalyzing(true);
     try {
       const response = await analyzeTicket(requestPayload);
@@ -459,66 +262,6 @@ export default function TicketAnalyzer() {
               className="w-full px-3 py-2 text-sm bg-white border border-zinc-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-sans"
               required
             />
-          </div>
-
-          {/* Transaction History Builder */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="block text-xs font-semibold text-zinc-600 font-sans">
-                Transaction History
-              </span>
-              <button
-                type="button"
-                onClick={addTransaction}
-                className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth="2.5"
-                  stroke="currentColor"
-                  className="h-3.5 w-3.5"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                </svg>
-                <span>Add transaction</span>
-              </button>
-            </div>
-
-            {transactions.length === 0 ? (
-              <div className="p-5 text-center text-xs text-zinc-500 border border-zinc-200 rounded-lg bg-zinc-50/30 font-sans">
-                No transactions added yet.
-              </div>
-            ) : (
-              <div className="overflow-x-auto border border-zinc-200 rounded-lg">
-                <table className="w-full text-left border-collapse min-w-[700px]">
-                  <thead>
-                    <tr className="bg-zinc-50 border-b border-zinc-200 text-[10px] font-bold text-zinc-500 uppercase tracking-wider font-sans">
-                      <th className="p-3 w-1/4">Transaction ID *</th>
-                      <th className="p-3 w-[150px]">Date/Time *</th>
-                      <th className="p-3 w-[120px]">Type</th>
-                      <th className="p-3 w-[100px]">Amount *</th>
-                      <th className="p-3 w-1/5">Counterparty *</th>
-                      <th className="p-3 w-[125px]">Status</th>
-                      <th className="p-3 w-[45px] text-center"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {transactions.map((tx, idx) => (
-                      <TransactionRow
-                        key={idx}
-                        index={idx}
-                        item={tx}
-                        isHighlighted={result?.relevant_transaction_id === tx.transaction_id}
-                        onUpdate={updateTransaction}
-                        onRemove={removeTransaction}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
           </div>
 
           {/* Sample Complaint Picker */}
