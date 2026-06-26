@@ -111,8 +111,8 @@ describe("public route contract", () => {
         ticket_id: "T-4",
         complaint: "I was charged 500 twice",
         transaction_history: [
-          { transaction_id: "TX-1", amount: 500, status: "success" },
-          { transaction_id: "TX-2", amount: 500, status: "success" },
+          { transaction_id: "TX-1", amount: 500, status: "completed" },
+          { transaction_id: "TX-2", amount: 500, status: "completed" },
         ],
       }),
     );
@@ -129,17 +129,18 @@ describe("public route contract", () => {
         ticket_id: "T-5",
         complaint: "Refund needed for 9999 taka",
         transaction_history: [
-          { transaction_id: "TX-1", amount: 100, status: "success" },
+          { transaction_id: "TX-1", amount: 100, status: "completed" },
         ],
       }),
     );
     const body = await readJson(response);
 
+    expect(response.status).toBe(200);
     expect(body.relevant_transaction_id).toBeNull();
     expect(body.evidence_verdict).toBe("insufficient_data");
   });
 
-  it("accepts unrelated optional input without leaking invalid enums", async () => {
+  it("rejects invalid optional enum inputs with HTTP 400", async () => {
     const response = await POST(
       jsonRequest({
         ticket_id: "T-6",
@@ -158,9 +159,9 @@ describe("public route contract", () => {
     );
     const body = await readJson(response);
 
-    expect(response.status).toBe(200);
-    expect(body.case_type).toBe("agent_cash_in_issue");
-    expect(body.department).toBe("agent_operations");
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe("invalid_request");
+    expect(body.error.issues).toBeDefined();
   });
 
   it("handles Bangla complaint text", async () => {

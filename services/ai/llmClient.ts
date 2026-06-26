@@ -139,7 +139,7 @@ function parseAnalyzeTicketResponse(
     throw new Error("LLM response must be a JSON object.");
   }
 
-  const normalized = {
+  const normalized: Record<string, unknown> = {
     ticket_id: readString(parsed, "ticket_id") || ticketId,
     relevant_transaction_id: readNullableString(
       parsed,
@@ -154,6 +154,13 @@ function parseAnalyzeTicketResponse(
     customer_reply: readString(parsed, "customer_reply"),
     human_review_required: readBoolean(parsed, "human_review_required"),
   };
+
+  // Preserve optional fields if present in the LLM response
+  const confidence = readNullableNumber(parsed, "confidence");
+  if (confidence !== null) normalized.confidence = confidence;
+
+  const reasonCodes = readStringArray(parsed, "reason_codes");
+  if (reasonCodes !== null) normalized.reason_codes = reasonCodes;
 
   return analyzeTicketResponseSchema.parse(normalized);
 }
@@ -211,3 +218,29 @@ function readBoolean(source: Record<string, unknown>, key: string): boolean {
 
   return value;
 }
+
+function readNullableNumber(
+  source: Record<string, unknown>,
+  key: string,
+): number | null {
+  const value = source[key];
+
+  if (value === undefined || value === null) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  return null;
+}
+
+function readStringArray(
+  source: Record<string, unknown>,
+  key: string,
+): string[] | null {
+  const value = source[key];
+
+  if (!Array.isArray(value)) return null;
+
+  const strings = value.filter((item) => typeof item === "string") as string[];
+
+  return strings.length > 0 ? strings : null;
+}
+

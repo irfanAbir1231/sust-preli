@@ -28,14 +28,43 @@ export const departmentSchema = z.enum([
   "fraud_risk",
 ]);
 
+export const languageSchema = z.enum(["en", "bn", "mixed"]);
+export const channelSchema = z.enum([
+  "in_app_chat",
+  "call_center",
+  "email",
+  "merchant_portal",
+  "field_agent",
+]);
+export const userTypeSchema = z.enum([
+  "customer",
+  "merchant",
+  "agent",
+  "unknown",
+]);
+export const transactionTypeSchema = z.enum([
+  "transfer",
+  "payment",
+  "cash_in",
+  "cash_out",
+  "settlement",
+  "refund",
+]);
+export const transactionStatusSchema = z.enum([
+  "completed",
+  "failed",
+  "pending",
+  "reversed",
+]);
+
 export const transactionHistoryItemSchema = z
   .object({
     transaction_id: z.string().optional(),
     timestamp: z.string().optional(),
-    type: z.string().optional(),
+    type: transactionTypeSchema.optional(),
     amount: z.number().finite().optional(),
     counterparty: z.string().optional(),
-    status: z.string().optional(),
+    status: transactionStatusSchema.optional(),
   })
   .passthrough();
 
@@ -43,14 +72,17 @@ export const analyzeTicketRequestSchema = z
   .object({
     ticket_id: z.string().min(1),
     complaint: z.string(),
-    language: z.string().optional(),
-    channel: z.string().optional(),
-    user_type: z.string().optional(),
+    language: languageSchema.optional(),
+    channel: channelSchema.optional(),
+    user_type: userTypeSchema.optional(),
     campaign_context: z.unknown().optional(),
     transaction_history: z.array(transactionHistoryItemSchema).optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
   })
   .passthrough();
+
+
+
 
 export const analyzeTicketResponseSchema = z.object({
   ticket_id: z.string(),
@@ -63,6 +95,8 @@ export const analyzeTicketResponseSchema = z.object({
   recommended_next_action: z.string(),
   customer_reply: z.string(),
   human_review_required: z.boolean(),
+  confidence: z.number().min(0).max(1).optional(),
+  reason_codes: z.array(z.string()).optional(),
 });
 
 export type UnknownRecord = Record<string, unknown>;
@@ -117,3 +151,4 @@ export function validateAnalyzeTicketResponse(
 
   return { success: true, data: result.data };
 }
+

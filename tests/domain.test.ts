@@ -36,7 +36,7 @@ function request(complaint: string): AnalyzeTicketRequest {
         amount: 500,
         type: "payment",
         counterparty: "Shop",
-        status: "success",
+        status: "completed",
       },
     ],
   };

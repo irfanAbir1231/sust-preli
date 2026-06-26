@@ -5,7 +5,16 @@ import type {
   Department,
   Severity,
 } from "@/schemas/apiContract";
-import { hasCredentialRisk } from "@/services/domain/safetyGuard";
+import {
+  isAgentCashInText,
+  isDuplicateText,
+  isMerchantSettlementText,
+  isPaymentFailedText,
+  isPhishingText,
+  isRefundText,
+  isWrongTransferText,
+  normalizeComplaint,
+} from "@/services/domain/normalization";
 
 type Classification = {
   caseType: CaseType;
@@ -13,40 +22,45 @@ type Classification = {
   severity: Severity;
 };
 
+/**
+ * Deterministic fallback classifier.
+ *
+ * Produces an initial AnalyzeTicketResponse that is then forwarded to
+ * formatAnalyzeTicketResponse (which runs the evidence engine + case policy +
+ * safety guardrails) — exactly the same pipeline as the AI path.
+ *
+ * NOTE: relevant_transaction_id / evidence_verdict / severity / department /
+ * human_review_required set here are placeholders that get overridden by the
+ * shared pipeline. Only case_type, agent_summary, recommended_next_action,
+ * and customer_reply originate from this module.
+ */
 export function analyzeTicketDeterministically(
   request: AnalyzeTicketRequest,
 ): AnalyzeTicketResponse {
   const classification = classifyComplaint(request.complaint);
-  const relevantTransactionId = findClearRelevantTransaction(request);
-  const evidenceVerdict = relevantTransactionId
-    ? inferEvidenceVerdict(request, relevantTransactionId)
-    : "insufficient_data";
-  const humanReviewRequired =
-    classification.caseType === "phishing_or_social_engineering" ||
-    classification.caseType === "wrong_transfer" ||
-    classification.severity === "high" ||
-    classification.severity === "critical" ||
-    evidenceVerdict !== "consistent";
 
   return {
     ticket_id: request.ticket_id,
-    relevant_transaction_id: relevantTransactionId,
-    evidence_verdict: evidenceVerdict,
+    relevant_transaction_id: null,       // overridden by evidenceEngine
+    evidence_verdict: "insufficient_data", // overridden by evidenceEngine
     case_type: classification.caseType,
-    severity: classification.severity,
-    department: classification.department,
-    agent_summary: buildAgentSummary(classification.caseType, evidenceVerdict),
+    severity: classification.severity,   // overridden by casePolicy
+    department: classification.department, // overridden by casePolicy
+    agent_summary: buildAgentSummary(classification.caseType),
     recommended_next_action: buildRecommendedAction(classification.caseType),
-    customer_reply:
-      "Thanks for contacting support. Our team will review the transaction and respond through official support channels.",
-    human_review_required: humanReviewRequired,
+    customer_reply: buildCustomerReply(classification.caseType),
+    human_review_required: false,        // overridden by casePolicy
   };
 }
 
-function classifyComplaint(complaint: string): Classification {
-  const text = complaint.toLowerCase();
+// ─────────────────────────────────────────────────────────────
+//  Complaint classifier – uses shared normalization helpers
+// ─────────────────────────────────────────────────────────────
 
-  if (hasCredentialRisk(text) || /phish|scam|fraud|link|password|otp|pin/.test(text)) {
+function classifyComplaint(complaint: string): Classification {
+  const text = normalizeComplaint(complaint);
+
+  if (isPhishingText(text) || /\botp\b|\bpin\b/.test(text)) {
     return {
       caseType: "phishing_or_social_engineering",
       department: "fraud_risk",
@@ -54,7 +68,7 @@ function classifyComplaint(complaint: string): Classification {
     };
   }
 
-  if (isWrongTransferComplaint(text)) {
+  if (isWrongTransferText(text)) {
     return {
       caseType: "wrong_transfer",
       department: "dispute_resolution",
@@ -62,7 +76,7 @@ function classifyComplaint(complaint: string): Classification {
     };
   }
 
-  if (/duplicate|twice|double|দুইবার/.test(text)) {
+  if (isDuplicateText(text)) {
     return {
       caseType: "duplicate_payment",
       department: "payments_ops",
@@ -70,7 +84,15 @@ function classifyComplaint(complaint: string): Classification {
     };
   }
 
-  if (/failed|fail|pending|declined|timeout|deducted|কেটে|ব্যর্থ/.test(text)) {
+  if (isAgentCashInText(text)) {
+    return {
+      caseType: "agent_cash_in_issue",
+      department: "agent_operations",
+      severity: "high",
+    };
+  }
+
+  if (isPaymentFailedText(text)) {
     return {
       caseType: "payment_failed",
       department: "payments_ops",
@@ -78,7 +100,7 @@ function classifyComplaint(complaint: string): Classification {
     };
   }
 
-  if (/refund|return|reversal|ফেরত/.test(text)) {
+  if (isRefundText(text)) {
     return {
       caseType: "refund_request",
       department: "customer_support",
@@ -86,19 +108,11 @@ function classifyComplaint(complaint: string): Classification {
     };
   }
 
-  if (/merchant|settlement|settled|মার্চেন্ট/.test(text)) {
+  if (isMerchantSettlementText(text)) {
     return {
       caseType: "merchant_settlement_delay",
       department: "merchant_operations",
       severity: "medium",
-    };
-  }
-
-  if (/agent|cash\s*in|cashin|এজেন্ট|ক্যাশ/.test(text)) {
-    return {
-      caseType: "agent_cash_in_issue",
-      department: "agent_operations",
-      severity: "high",
     };
   }
 
@@ -109,185 +123,67 @@ function classifyComplaint(complaint: string): Classification {
   };
 }
 
-function findClearRelevantTransaction(
-  request: AnalyzeTicketRequest,
-): string | null {
-  const history = request.transaction_history ?? [];
+// ─────────────────────────────────────────────────────────────
+//  Text builders
+// ─────────────────────────────────────────────────────────────
 
-  if (history.length === 0) {
-    return null;
-  }
+function buildAgentSummary(caseType: CaseType): string {
+  const descriptions: Record<CaseType, string> = {
+    wrong_transfer:
+      "Customer reports sending funds to an unintended recipient. Transaction details require verification.",
+    payment_failed:
+      "Customer reports a failed payment that may have caused a balance deduction. Ledger investigation required.",
+    refund_request:
+      "Customer is requesting a refund for a completed transaction. Eligibility depends on policy.",
+    duplicate_payment:
+      "Customer reports being charged twice for the same transaction. Duplicate verification required.",
+    merchant_settlement_delay:
+      "Merchant reports a delayed settlement beyond the expected processing window.",
+    agent_cash_in_issue:
+      "Customer reports a cash-in transaction via agent that has not been reflected in their balance.",
+    phishing_or_social_engineering:
+      "Customer reports a suspicious contact requesting sensitive credentials. Likely social engineering attempt.",
+    other:
+      "Customer has reported an issue requiring further clarification before investigation can proceed.",
+  };
 
-  const classification = classifyComplaint(request.complaint);
-
-  if (classification.caseType === "duplicate_payment") {
-    return findDuplicateTransaction(history);
-  }
-
-  const scored = history
-    .filter((transaction) => transaction.transaction_id)
-    .map((transaction) => ({
-      transaction,
-      score: scoreTransaction(request.complaint, transaction),
-    }))
-    .sort((left, right) => right.score - left.score);
-
-  const best = scored[0];
-  const second = scored[1];
-
-  if (!best || best.score < 3 || (second && best.score - second.score < 2)) {
-    return null;
-  }
-
-  return best.transaction.transaction_id ?? null;
-}
-
-function inferEvidenceVerdict(
-  request: AnalyzeTicketRequest,
-  transactionId: string,
-): AnalyzeTicketResponse["evidence_verdict"] {
-  const transaction = request.transaction_history?.find(
-    (item) => item.transaction_id === transactionId,
-  );
-  const complaint = request.complaint.toLowerCase();
-
-  if (!transaction) {
-    return "insufficient_data";
-  }
-
-  if (
-    /failed|declined|pending|ব্যর্থ/.test(complaint) &&
-    transaction.status &&
-    /success|completed/i.test(transaction.status)
-  ) {
-    return "inconsistent";
-  }
-
-  if (isWrongTransferComplaint(complaint) && hasEstablishedRecipientPattern(request, transaction)) {
-    return "inconsistent";
-  }
-
-  return "consistent";
-}
-
-function scoreTransaction(
-  complaint: string,
-  transaction: NonNullable<AnalyzeTicketRequest["transaction_history"]>[number],
-): number {
-  const text = complaint.toLowerCase();
-  let score = 0;
-
-  if (
-    transaction.transaction_id &&
-    text.includes(transaction.transaction_id.toLowerCase())
-  ) {
-    score += 8;
-  }
-
-  if (
-    typeof transaction.amount === "number" &&
-    extractAmounts(text).includes(transaction.amount)
-  ) {
-    score += 3;
-  }
-
-  if (transaction.type === "cash_in" && /cash\s*in|cashin|ক্যাশ/.test(text)) {
-    score += 3;
-  }
-
-  for (const field of ["type", "counterparty", "status"] as const) {
-    const value = transaction[field];
-    if (value && text.includes(value.toLowerCase().replace("_", " "))) {
-      score += 2;
-    }
-  }
-
-  return score;
-}
-
-function extractAmounts(text: string): number[] {
-  const normalized = normalizeBanglaDigits(text);
-
-  return Array.from(normalized.matchAll(/\d+(?:\.\d+)?/g), ([match]) =>
-    Number(match),
-  ).filter(Number.isFinite);
-}
-
-function isWrongTransferComplaint(text: string): boolean {
-  return (
-    /sent\b.*\bwrong|wrong\s+(?:number|person|recipient)|mistake|mistaken|didn'?t\s+get|did not get|he says he didn'?t get|ভুল/.test(
-      text,
-    ) && !/^something is wrong\b/.test(text)
-  );
-}
-
-function findDuplicateTransaction(
-  history: NonNullable<AnalyzeTicketRequest["transaction_history"]>,
-): string | null {
-  const groups = new Map<string, typeof history>();
-
-  for (const transaction of history) {
-    if (
-      !transaction.transaction_id ||
-      typeof transaction.amount !== "number" ||
-      !transaction.counterparty ||
-      !transaction.type
-    ) {
-      continue;
-    }
-
-    const key = `${transaction.amount}:${transaction.counterparty ?? ""}:${transaction.type ?? ""}`;
-    groups.set(key, [...(groups.get(key) ?? []), transaction]);
-  }
-
-  for (const duplicates of groups.values()) {
-    if (duplicates.length > 1) {
-      return duplicates[duplicates.length - 1]?.transaction_id ?? null;
-    }
-  }
-
-  return null;
-}
-
-function hasEstablishedRecipientPattern(
-  request: AnalyzeTicketRequest,
-  transaction: NonNullable<AnalyzeTicketRequest["transaction_history"]>[number],
-): boolean {
-  if (!transaction.counterparty) {
-    return false;
-  }
-
-  const sameCounterparty =
-    request.transaction_history?.filter(
-      (item) => item.counterparty === transaction.counterparty,
-    ) ?? [];
-
-  return sameCounterparty.length >= 3;
-}
-
-function normalizeBanglaDigits(text: string): string {
-  const banglaDigits = "০১২৩৪৫৬৭৮৯";
-
-  return text.replace(/[০-৯]/g, (digit) =>
-    String(banglaDigits.indexOf(digit)),
-  );
-}
-
-function buildAgentSummary(
-  caseType: CaseType,
-  evidenceVerdict: AnalyzeTicketResponse["evidence_verdict"],
-): string {
-  return `Deterministic analysis classified the ticket as ${caseType} with ${evidenceVerdict} transaction evidence.`;
+  return descriptions[caseType];
 }
 
 function buildRecommendedAction(caseType: CaseType): string {
   if (caseType === "phishing_or_social_engineering") {
-    return "Escalate to fraud risk review and advise the customer to use only official support channels.";
+    return "Escalate to fraud risk team immediately. Advise the customer never to share credentials with anyone.";
   }
 
   if (caseType === "wrong_transfer" || caseType === "duplicate_payment") {
-    return "Escalate to dispute resolution for human financial authorization review.";
+    return "Escalate to dispute resolution for financial authorization review per policy.";
   }
 
-  return "Route to the responsible operations queue for review.";
+  if (caseType === "payment_failed") {
+    return "Investigate transaction ledger status with payments operations. Initiate reversal if deduction is confirmed on a failed transaction.";
+  }
+
+  if (caseType === "agent_cash_in_issue") {
+    return "Investigate pending cash-in status with agent operations. Confirm settlement within standard SLA.";
+  }
+
+  if (caseType === "merchant_settlement_delay") {
+    return "Route to merchant operations to check batch settlement status and provide an updated ETA.";
+  }
+
+  return "Route to the appropriate operations queue and request clarifying details from the customer if needed.";
+}
+
+function buildCustomerReply(caseType: CaseType): string {
+  if (caseType === "phishing_or_social_engineering") {
+    return (
+      "Thank you for reaching out. We never ask for your PIN, OTP, or password under any circumstances. " +
+      "Please do not share these with anyone. Our team has been notified and will follow up through official channels."
+    );
+  }
+
+  return (
+    "Thank you for contacting support. Our team will review your case and respond through official support channels. " +
+    "Please do not share your PIN or OTP with anyone."
+  );
 }

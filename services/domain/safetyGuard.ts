@@ -140,18 +140,15 @@ export function hasCredentialRisk(text: string): boolean {
 }
 
 function requiresHumanReview(response: AnalyzeTicketResponse): boolean {
+  // Safety-specific escalation only: phishing and critical severity.
+  // Operational escalation (wrong_transfer, duplicate_payment, etc.)
+  // is handled by casePolicy.ts to avoid false overrides on ambiguous cases.
   return (
     response.case_type === "phishing_or_social_engineering" ||
-    response.case_type === "wrong_transfer" ||
-    response.case_type === "duplicate_payment" ||
-    response.severity === "critical" ||
-    response.severity === "high" ||
-    (response.evidence_verdict === "inconsistent" &&
-      ["wrong_transfer", "refund_request", "duplicate_payment"].includes(
-        response.case_type,
-      ))
+    response.severity === "critical"
   );
 }
+
 
 function isUnsafeCredentialRequest(sentence: string): boolean {
   if (!CREDENTIAL_REQUEST_PATTERN.test(sentence)) {
