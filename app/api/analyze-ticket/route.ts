@@ -89,8 +89,21 @@ export async function POST(request: Request) {
     if (isLlmConfigured()) {
       try {
         analysis = await analyzeTicketWithAI(validation.data);
-      } catch {
-        analysis = buildFallbackAnalysis(validation.data);
+      } catch (error) {
+        console.error(
+          "Internal Groq Error:",
+          error instanceof Error ? error.message : "Unknown error",
+        );
+
+        return json<ErrorResponse>(
+          {
+            error: {
+              code: "internal_groq_error",
+              message: "An internal error occurred during processing.",
+            },
+          },
+          500,
+        );
       }
     }
 

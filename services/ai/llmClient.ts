@@ -24,28 +24,50 @@ type LlmClientConfig = {
 };
 
 const DEFAULT_API_URL = "https://api.openai.com/v1/chat/completions";
+const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const DEFAULT_TIMEOUT_MS = 12_000;
 const DEFAULT_MAX_RETRIES = 2;
 
+function readLlmApiKey(config: LlmClientConfig): string | undefined {
+  return config.apiKey ?? process.env.LLM_API_KEY ?? process.env.GROQ_API_KEY;
+}
+
+function readLlmModel(config: LlmClientConfig): string | undefined {
+  return config.model ?? process.env.LLM_MODEL ?? process.env.GROQ_MODEL;
+}
+
+function readLlmApiUrl(config: LlmClientConfig): string {
+  if (config.apiUrl) {
+    return config.apiUrl;
+  }
+
+  if (process.env.LLM_API_URL) {
+    return process.env.LLM_API_URL;
+  }
+
+  if (process.env.GROQ_API_KEY || process.env.GROQ_MODEL) {
+    return GROQ_API_URL;
+  }
+
+  return DEFAULT_API_URL;
+}
+
 export function isLlmConfigured(config: LlmClientConfig = {}): boolean {
-  return Boolean(
-    (config.apiKey ?? process.env.LLM_API_KEY) &&
-      (config.model ?? process.env.LLM_MODEL),
-  );
+  return Boolean(readLlmApiKey(config) && readLlmModel(config));
 }
 
 export async function analyzeTicketWithAI(
   request: AnalyzeTicketRequest,
   config: LlmClientConfig = {},
 ): Promise<AnalyzeTicketResponse> {
-  const apiKey = config.apiKey ?? process.env.LLM_API_KEY;
-  const model = config.model ?? process.env.LLM_MODEL;
+  const apiKey = readLlmApiKey(config);
+  const model = readLlmModel(config);
 
   if (!apiKey || !model) {
     throw new Error("LLM is not configured.");
   }
 
-  const apiUrl = config.apiUrl ?? process.env.LLM_API_URL ?? DEFAULT_API_URL;
+  const apiUrl = readLlmApiUrl(config);
   const maxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
   const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   let lastError: unknown;
