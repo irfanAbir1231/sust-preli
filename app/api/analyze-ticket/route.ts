@@ -5,6 +5,10 @@ import {
   type ValidationIssue,
   validateAnalyzeTicketRequest,
 } from "@/schemas/apiContract";
+import {
+  analyzeTicketWithAI,
+  isLlmConfigured,
+} from "@/services/ai/llmClient";
 
 export const maxDuration = 30;
 
@@ -79,10 +83,17 @@ export async function POST(request: Request) {
       );
     }
 
-    return json<AnalyzeTicketResponse>(
-      buildFallbackAnalysis(validation.data),
-      200,
-    );
+    let analysis = buildFallbackAnalysis(validation.data);
+
+    if (isLlmConfigured()) {
+      try {
+        analysis = await analyzeTicketWithAI(validation.data);
+      } catch {
+        analysis = buildFallbackAnalysis(validation.data);
+      }
+    }
+
+    return json<AnalyzeTicketResponse>(analysis, 200);
   } catch {
     return json<ErrorResponse>(
       {

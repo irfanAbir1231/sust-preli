@@ -1,0 +1,196 @@
+import {
+  type AnalyzeTicketRequest,
+  type AnalyzeTicketResponse,
+  isRecord,
+} from "@/schemas/apiContract";
+import { buildAnalyzeTicketMessages } from "@/services/ai/prompts";
+
+type ChatCompletionChoice = {
+  message?: {
+    content?: unknown;
+  };
+};
+
+type ChatCompletionResponse = {
+  choices?: ChatCompletionChoice[];
+};
+
+type LlmClientConfig = {
+  apiKey?: string;
+  apiUrl?: string;
+  model?: string;
+  maxRetries?: number;
+  timeoutMs?: number;
+};
+
+const DEFAULT_API_URL = "https://api.openai.com/v1/chat/completions";
+const DEFAULT_TIMEOUT_MS = 12_000;
+const DEFAULT_MAX_RETRIES = 2;
+
+export function isLlmConfigured(config: LlmClientConfig = {}): boolean {
+  return Boolean(
+    (config.apiKey ?? process.env.LLM_API_KEY) &&
+      (config.model ?? process.env.LLM_MODEL),
+  );
+}
+
+export async function analyzeTicketWithAI(
+  request: AnalyzeTicketRequest,
+  config: LlmClientConfig = {},
+): Promise<AnalyzeTicketResponse> {
+  const apiKey = config.apiKey ?? process.env.LLM_API_KEY;
+  const model = config.model ?? process.env.LLM_MODEL;
+
+  if (!apiKey || !model) {
+    throw new Error("LLM is not configured.");
+  }
+
+  const apiUrl = config.apiUrl ?? process.env.LLM_API_URL ?? DEFAULT_API_URL;
+  const maxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try {
+      const content = await callChatCompletion({
+        apiKey,
+        apiUrl,
+        model,
+        request,
+        timeoutMs,
+      });
+
+      return parseAnalyzeTicketResponse(content, request.ticket_id);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("LLM analysis failed.");
+}
+
+async function callChatCompletion(options: {
+  apiKey: string;
+  apiUrl: string;
+  model: string;
+  request: AnalyzeTicketRequest;
+  timeoutMs: number;
+}): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs);
+
+  try {
+    const response = await fetch(options.apiUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${options.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: options.model,
+        messages: buildAnalyzeTicketMessages(options.request),
+        temperature: 0.1,
+        response_format: { type: "json_object" },
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`LLM request failed with status ${response.status}.`);
+    }
+
+    const data = (await response.json()) as ChatCompletionResponse;
+    const content = data.choices?.[0]?.message?.content;
+
+    if (typeof content !== "string" || content.trim().length === 0) {
+      throw new Error("LLM returned an empty response.");
+    }
+
+    return content;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function parseAnalyzeTicketResponse(
+  content: string,
+  ticketId: string,
+): AnalyzeTicketResponse {
+  const parsed = JSON.parse(extractJsonObject(content));
+
+  if (!isRecord(parsed)) {
+    throw new Error("LLM response must be a JSON object.");
+  }
+
+  return {
+    ticket_id: readString(parsed, "ticket_id") || ticketId,
+    relevant_transaction_id: readNullableString(
+      parsed,
+      "relevant_transaction_id",
+    ),
+    evidence_verdict: readString(parsed, "evidence_verdict"),
+    case_type: readString(parsed, "case_type"),
+    severity: readString(parsed, "severity"),
+    department: readString(parsed, "department"),
+    agent_summary: readString(parsed, "agent_summary"),
+    recommended_next_action: readString(parsed, "recommended_next_action"),
+    customer_reply: readString(parsed, "customer_reply"),
+    human_review_required: readBoolean(parsed, "human_review_required"),
+  };
+}
+
+function extractJsonObject(content: string): string {
+  const trimmed = content.trim();
+
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    return trimmed;
+  }
+
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error("LLM response did not contain JSON.");
+  }
+
+  return trimmed.slice(start, end + 1);
+}
+
+function readString(source: Record<string, unknown>, key: string): string {
+  const value = source[key];
+
+  if (typeof value !== "string") {
+    throw new Error(`LLM response field "${key}" must be a string.`);
+  }
+
+  return value;
+}
+
+function readNullableString(
+  source: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = source[key];
+
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    throw new Error(`LLM response field "${key}" must be a string or null.`);
+  }
+
+  return value;
+}
+
+function readBoolean(source: Record<string, unknown>, key: string): boolean {
+  const value = source[key];
+
+  if (typeof value !== "boolean") {
+    throw new Error(`LLM response field "${key}" must be a boolean.`);
+  }
+
+  return value;
+}
