@@ -9,6 +9,7 @@ import {
   analyzeTicketWithAI,
   isLlmConfigured,
 } from "@/services/ai/llmClient";
+import { formatAnalyzeTicketResponse } from "@/services/domain/dataFormatter";
 
 export const maxDuration = 30;
 
@@ -93,7 +94,10 @@ export async function POST(request: Request) {
       }
     }
 
-    return json<AnalyzeTicketResponse>(analysis, 200);
+    return json<AnalyzeTicketResponse>(
+      formatAnalyzeTicketResponse(analysis),
+      200,
+    );
   } catch {
     return json<ErrorResponse>(
       {
