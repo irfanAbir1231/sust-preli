@@ -9,6 +9,176 @@ import type { AnalyzeTicketRequest, AnalyzeTicketResponse, TransactionHistoryIte
 
 type LocalTransactionItem = TransactionHistoryItem & { localTime?: string };
 
+type SampleComplaint = {
+  id: string;
+  label: string;
+  hint: string;
+  ticketId: string;
+  language: string;
+  channel: string;
+  userType: string;
+  complaint: string;
+  transactions: Array<
+    Omit<LocalTransactionItem, "localTime"> & { localTime: string }
+  >;
+};
+
+const SAMPLE_COMPLAINTS: SampleComplaint[] = [
+  {
+    id: "duplicate_bill",
+    label: "Duplicate Bill Payment",
+    hint: "Customer charged twice for one bill",
+    ticketId: "DEMO-DUP-SAMPLE",
+    language: "en",
+    channel: "in_app_chat",
+    userType: "customer",
+    complaint:
+      "I paid my electricity bill once, but 850 BDT was deducted twice. Please check and refund the duplicate amount.",
+    transactions: [
+      {
+        transaction_id: "TXN-9821",
+        localTime: "2026-04-13T10:15",
+        type: "payment",
+        amount: 850,
+        counterparty: "DESCO-BILLER",
+        status: "completed",
+      },
+      {
+        transaction_id: "TXN-9822",
+        localTime: "2026-04-13T10:16",
+        type: "payment",
+        amount: 850,
+        counterparty: "DESCO-BILLER",
+        status: "completed",
+      },
+    ],
+  },
+  {
+    id: "wrong_transfer",
+    label: "Wrong Transfer",
+    hint: "Sent money to the wrong number",
+    ticketId: "TKT-001",
+    language: "en",
+    channel: "in_app_chat",
+    userType: "customer",
+    complaint:
+      "I sent 5000 taka to a wrong number around 2pm today. The number was supposed to be 01712345678 but I think I typed it wrong. The person isn't responding to my call. Please help me get my money back.",
+    transactions: [
+      {
+        transaction_id: "TXN-9101",
+        localTime: "2026-04-14T14:08",
+        type: "transfer",
+        amount: 5000,
+        counterparty: "+8801719876543",
+        status: "completed",
+      },
+      {
+        transaction_id: "TXN-9087",
+        localTime: "2026-04-13T18:12",
+        type: "cash_in",
+        amount: 10000,
+        counterparty: "AGENT-512",
+        status: "completed",
+      },
+    ],
+  },
+  {
+    id: "payment_failed",
+    label: "Failed Online Payment",
+    hint: "Money deducted but order not placed",
+    ticketId: "TKT-PAY-FAIL",
+    language: "en",
+    channel: "call_center",
+    userType: "customer",
+    complaint:
+      "I tried to pay 1250 BDT for an order on Daraz at 9pm last night but the payment failed. My bank statement shows the amount was deducted, but I never received any order confirmation and the merchant has no record of my payment.",
+    transactions: [
+      {
+        transaction_id: "TXN-7750",
+        localTime: "2026-04-15T21:04",
+        type: "payment",
+        amount: 1250,
+        counterparty: "DARAZ-MERCHANT-441",
+        status: "failed",
+      },
+      {
+        transaction_id: "TXN-7749",
+        localTime: "2026-04-15T20:58",
+        type: "cash_in",
+        amount: 5000,
+        counterparty: "AGENT-203",
+        status: "completed",
+      },
+    ],
+  },
+  {
+    id: "merchant_settlement",
+    label: "Merchant Settlement Delay",
+    hint: "Merchant waiting for funds to settle",
+    ticketId: "TKT-MERCH-22",
+    language: "en",
+    channel: "merchant_portal",
+    userType: "merchant",
+    complaint:
+      "I run a small clothing shop and accept payments via QueueStorm. I made 3 transactions yesterday totaling 18,400 BDT but the settlement has not arrived in my bank account yet. It has been more than 24 hours. Please release the funds.",
+    transactions: [
+      {
+        transaction_id: "TXN-M-3301",
+        localTime: "2026-04-14T11:22",
+        type: "payment",
+        amount: 6400,
+        counterparty: "CUSTOMER-+8801711122233",
+        status: "completed",
+      },
+      {
+        transaction_id: "TXN-M-3302",
+        localTime: "2026-04-14T13:45",
+        type: "payment",
+        amount: 5200,
+        counterparty: "CUSTOMER-+8801712345678",
+        status: "completed",
+      },
+      {
+        transaction_id: "TXN-M-3303",
+        localTime: "2026-04-14T16:08",
+        type: "payment",
+        amount: 6800,
+        counterparty: "CUSTOMER-+8801719988776",
+        status: "completed",
+      },
+    ],
+  },
+  {
+    id: "phishing",
+    label: "Phishing Attempt",
+    hint: "Customer tricked into sharing OTP",
+    ticketId: "TKT-PHISH-09",
+    language: "mixed",
+    channel: "in_app_chat",
+    userType: "customer",
+    complaint:
+      "Ami ekjon caller ke amar OTP diye diyechi je amake boleche ami prize paisi. Tarpor amar account theke 7500 taka chole giyeche. Please help, eta fraud hoyeche.",
+    transactions: [
+      {
+        transaction_id: "TXN-FR-5501",
+        localTime: "2026-04-15T12:33",
+        type: "cash_out",
+        amount: 7500,
+        counterparty: "UNKNOWN-WALLET-9981",
+        status: "completed",
+      },
+      {
+        transaction_id: "TXN-5500",
+        localTime: "2026-04-15T12:18",
+        type: "cash_in",
+        amount: 8000,
+        counterparty: "AGENT-077",
+        status: "completed",
+      },
+    ],
+  },
+];
+
 export default function TicketAnalyzer() {
   // Input fields state
   const [ticketId, setTicketId] = useState("DEMO-001");
@@ -68,33 +238,22 @@ export default function TicketAnalyzer() {
   };
 
   // Synthetic Sample loader
-  const loadSample = () => {
-    setTicketId("DEMO-DUP-SAMPLE");
-    setLanguage("en");
-    setChannel("in_app_chat");
-    setUserType("customer");
-    setComplaint("I paid my electricity bill once, but 850 BDT was deducted twice.");
-    
-    // Set 2 duplicate transaction items close in time (e.g. 1 minute apart)
-    setTransactions([
-      {
-        transaction_id: "TXN-9821",
-        localTime: "2026-04-13T10:15",
-        type: "payment",
-        amount: 850,
-        counterparty: "DESCO-BILLER",
-        status: "completed",
-      },
-      {
-        transaction_id: "TXN-9822",
-        localTime: "2026-04-13T10:16",
-        type: "payment",
-        amount: 850,
-        counterparty: "DESCO-BILLER",
-        status: "completed",
-      },
-    ]);
-    
+  const applySample = (sample: SampleComplaint) => {
+    setTicketId(sample.ticketId);
+    setLanguage(sample.language);
+    setChannel(sample.channel);
+    setUserType(sample.userType);
+    setComplaint(sample.complaint);
+    setTransactions(
+      sample.transactions.map((tx) => ({
+        transaction_id: tx.transaction_id,
+        localTime: tx.localTime,
+        type: tx.type,
+        amount: tx.amount,
+        counterparty: tx.counterparty,
+        status: tx.status,
+      })),
+    );
     setValidationError(null);
     setApiError(null);
     setResult(null);
@@ -347,16 +506,55 @@ export default function TicketAnalyzer() {
             )}
           </div>
 
+          {/* Sample Complaint Picker */}
+          <div className="space-y-2 pt-3 border-t border-zinc-100">
+            <div className="flex items-center justify-between">
+              <span className="block text-xs font-semibold text-zinc-600 font-sans">
+                Try a sample complaint
+              </span>
+              <span className="text-[10px] text-zinc-400 font-sans">
+                Click to load &rarr; then Analyze
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {SAMPLE_COMPLAINTS.map((sample) => {
+                const isActive = ticketId === sample.ticketId;
+                return (
+                  <button
+                    key={sample.id}
+                    type="button"
+                    onClick={() => applySample(sample)}
+                    title={sample.hint}
+                    className={`group inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border transition-colors font-sans ${
+                      isActive
+                        ? "bg-blue-50 border-blue-300 text-blue-700"
+                        : "bg-zinc-50 hover:bg-blue-50 border-zinc-200 hover:border-blue-300 text-zinc-700 hover:text-blue-700"
+                    }`}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth="2"
+                      stroke="currentColor"
+                      className="h-3 w-3 opacity-70"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z"
+                      />
+                    </svg>
+                    <span>{sample.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Form Actions Section */}
           <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-zinc-100">
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={loadSample}
-                className="px-3.5 py-2 text-xs font-semibold text-zinc-700 bg-zinc-100 hover:bg-zinc-200 border border-zinc-300 rounded-md transition-colors font-sans"
-              >
-                Load Sample
-              </button>
               <button
                 type="button"
                 onClick={resetForm}
