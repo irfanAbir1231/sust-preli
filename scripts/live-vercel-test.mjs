@@ -442,8 +442,8 @@ async function runValidationTests() {
         user_type: "invalid-user-type",
         transaction_history: []
       }),
-      expectedStatus: 200, // as Zod schema has no strict enums for request optional fields, it should succeed
-      validate: (status, data) => status === 200
+      expectedStatus: 400,
+      validate: (status, data) => status === 400 && data && data.error && data.error.code === "invalid_request"
     }
   ];
 
