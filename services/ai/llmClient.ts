@@ -1,6 +1,7 @@
 import {
   type AnalyzeTicketRequest,
   type AnalyzeTicketResponse,
+  analyzeTicketResponseSchema,
   isRecord,
 } from "@/schemas/apiContract";
 import { buildAnalyzeTicketMessages } from "@/services/ai/prompts";
@@ -23,17 +24,17 @@ type LlmClientConfig = {
   timeoutMs?: number;
 };
 
-const DEFAULT_API_URL = "https://api.openai.com/v1/chat/completions";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+const DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile";
 const DEFAULT_TIMEOUT_MS = 12_000;
-const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_MAX_RETRIES = 1;
 
 function readLlmApiKey(config: LlmClientConfig): string | undefined {
-  return config.apiKey ?? process.env.LLM_API_KEY ?? process.env.GROQ_API_KEY;
+  return config.apiKey ?? process.env.GROQ_API_KEY;
 }
 
-function readLlmModel(config: LlmClientConfig): string | undefined {
-  return config.model ?? process.env.LLM_MODEL ?? process.env.GROQ_MODEL;
+function readLlmModel(config: LlmClientConfig): string {
+  return config.model ?? process.env.GROQ_MODEL ?? DEFAULT_GROQ_MODEL;
 }
 
 function readLlmApiUrl(config: LlmClientConfig): string {
@@ -41,19 +42,11 @@ function readLlmApiUrl(config: LlmClientConfig): string {
     return config.apiUrl;
   }
 
-  if (process.env.LLM_API_URL) {
-    return process.env.LLM_API_URL;
-  }
-
-  if (process.env.GROQ_API_KEY || process.env.GROQ_MODEL) {
-    return GROQ_API_URL;
-  }
-
-  return DEFAULT_API_URL;
+  return GROQ_API_URL;
 }
 
 export function isLlmConfigured(config: LlmClientConfig = {}): boolean {
-  return Boolean(readLlmApiKey(config) && readLlmModel(config));
+  return Boolean(readLlmApiKey(config));
 }
 
 export async function analyzeTicketWithAI(
@@ -63,12 +56,12 @@ export async function analyzeTicketWithAI(
   const apiKey = readLlmApiKey(config);
   const model = readLlmModel(config);
 
-  if (!apiKey || !model) {
+  if (!apiKey) {
     throw new Error("LLM is not configured.");
   }
 
   const apiUrl = readLlmApiUrl(config);
-  const maxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const maxRetries = Math.min(config.maxRetries ?? DEFAULT_MAX_RETRIES, 1);
   const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   let lastError: unknown;
 
@@ -146,7 +139,7 @@ function parseAnalyzeTicketResponse(
     throw new Error("LLM response must be a JSON object.");
   }
 
-  return {
+  const normalized = {
     ticket_id: readString(parsed, "ticket_id") || ticketId,
     relevant_transaction_id: readNullableString(
       parsed,
@@ -161,6 +154,8 @@ function parseAnalyzeTicketResponse(
     customer_reply: readString(parsed, "customer_reply"),
     human_review_required: readBoolean(parsed, "human_review_required"),
   };
+
+  return analyzeTicketResponseSchema.parse(normalized);
 }
 
 function extractJsonObject(content: string): string {

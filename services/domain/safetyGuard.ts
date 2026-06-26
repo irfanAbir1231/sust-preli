@@ -1,88 +1,118 @@
-import type { AnalyzeTicketResponse } from "@/schemas/apiContract";
+import type {
+  AnalyzeTicketResponse,
+  CaseType,
+  Department,
+  EvidenceVerdict,
+  Severity,
+} from "@/schemas/apiContract";
 
 const CREDENTIAL_REQUEST_PATTERN =
-  /\b(?:pin|otp|password|passcode|secret\s+code|security\s+code)\b/i;
+  /\b(?:send|share|provide|enter|disclose|reveal|give|submit|tell|confirm)\b[^.!?]*(?:pin|otp|password|passcode|full\s+card\s+number|secret\s+credentials?|security\s+code)\b/i;
+
+const CREDENTIAL_TOPIC_PATTERN =
+  /\b(?:pin|otp|password|passcode|full\s+card\s+number|secret\s+credentials?|security\s+code)\b/i;
+
+const THIRD_PARTY_PATTERN =
+  /\b(?:telegram|whatsapp|imo|messenger|facebook|third[-\s]?party|unofficial)\b/i;
 
 const REFUND_PROMISE_REPLACEMENTS: Array<[RegExp, string]> = [
   [
-    /\bwe\s+(?:will|shall|can)\s+(?:refund|reverse|return)\s+(?:you|your|the)?\s*(?:money|amount|payment|funds)?\b/gi,
-    "any eligible amount will be returned through official channels",
+    /\b(?:we|i|our\s+team)\s+(?:will|shall|can)\s+(?:refund|reverse|return|recover|unblock)\b[^.!?]*/gi,
+    "Our team will review the transaction, and any eligible amount will be returned through official channels according to applicable policy",
   ],
   [
-    /\byou\s+will\s+(?:be\s+)?(?:get|receive)\s+(?:a\s+)?(?:refund|reversal)\b/gi,
-    "any eligible amount will be returned through official channels",
+    /\b(?:refund|reversal|account\s+unblock|funds?\s+recovery)\s+(?:is|has\s+been|will\s+be)\s+(?:guaranteed|approved|confirmed|completed)\b[^.!?]*/gi,
+    "Our team will review the transaction, and any eligible amount will be returned through official channels according to applicable policy",
   ],
   [
-    /\b(?:refund|reversal)\s+(?:is|has\s+been)\s+(?:guaranteed|approved|confirmed)\b/gi,
-    "any eligible amount will be returned through official channels",
+    /\byou\s+will\s+(?:get|receive|recover)\b[^.!?]*(?:refund|reversal|money|funds?)\b[^.!?]*/gi,
+    "Our team will review the transaction, and any eligible amount will be returned through official channels according to applicable policy",
   ],
 ];
 
 const SAFE_CREDENTIAL_WARNING =
-  "For your safety, never share your PIN, OTP, password, or secret credentials with anyone.";
+  "For your safety, never share your PIN, OTP, password, full card number, or secret credentials with anyone.";
 
-const HUMAN_REVIEW_CASE_TYPES = new Set([
-  "phishing",
-  "fraud",
-  "account_takeover",
-  "unauthorized_transaction",
-]);
+const OFFICIAL_CHANNELS_MESSAGE =
+  "Please use only official support channels for follow-up.";
 
-export const VALID_EVIDENCE_VERDICTS = [
+export const VALID_EVIDENCE_VERDICTS: readonly EvidenceVerdict[] = [
   "consistent",
   "inconsistent",
   "insufficient_data",
-] as const;
+];
 
-export const VALID_SEVERITIES = ["low", "medium", "high", "critical"] as const;
-
-export const VALID_DEPARTMENTS = [
-  "support",
-  "fraud",
-  "risk",
-  "compliance",
-  "operations",
-] as const;
-
-export const VALID_CASE_TYPES = [
-  "general_support",
-  "failed_transaction",
-  "unauthorized_transaction",
+export const VALID_CASE_TYPES: readonly CaseType[] = [
+  "wrong_transfer",
+  "payment_failed",
   "refund_request",
-  "phishing",
-  "account_access",
-  "campaign_issue",
-] as const;
+  "duplicate_payment",
+  "merchant_settlement_delay",
+  "agent_cash_in_issue",
+  "phishing_or_social_engineering",
+  "other",
+];
+
+export const VALID_SEVERITIES: readonly Severity[] = [
+  "low",
+  "medium",
+  "high",
+  "critical",
+];
+
+export const VALID_DEPARTMENTS: readonly Department[] = [
+  "customer_support",
+  "dispute_resolution",
+  "payments_ops",
+  "merchant_operations",
+  "agent_operations",
+  "fraud_risk",
+];
 
 export function enforceSafetyGuardrails(
-  llmResponse: AnalyzeTicketResponse,
+  response: AnalyzeTicketResponse,
 ): AnalyzeTicketResponse {
-  const normalized = normalizeEnumFields(llmResponse);
-  const customerReply = sanitizeCustomerReply(normalized.customer_reply);
+  const normalized = normalizeEnumFields(response);
+  const customerReply = sanitizePublicText(normalized.customer_reply);
+  const recommendedNextAction = sanitizePublicText(
+    normalized.recommended_next_action,
+  );
 
   return {
     ...normalized,
     customer_reply: customerReply,
+    recommended_next_action: recommendedNextAction,
     human_review_required:
-      normalized.human_review_required ||
-      HUMAN_REVIEW_CASE_TYPES.has(normalized.case_type) ||
-      normalized.severity === "critical",
+      normalized.human_review_required || requiresHumanReview(normalized),
   };
 }
 
-export function sanitizeCustomerReply(customerReply: string): string {
-  const withoutCredentialRequests =
-    removeCredentialRequestSentences(customerReply);
-  const withoutRefundPromises = replaceRefundPromises(
-    withoutCredentialRequests,
+export function sanitizePublicText(text: string): string {
+  const sentences = splitSentences(text);
+  const safeSentences = sentences.filter(
+    (sentence) =>
+      !isUnsafeCredentialRequest(sentence) &&
+      !THIRD_PARTY_PATTERN.test(sentence),
   );
-  const cleaned = normalizeWhitespace(withoutRefundPromises);
+  const hadCredentialRequest = sentences.some(isUnsafeCredentialRequest);
+  const hadThirdPartyInstruction = sentences.some((sentence) =>
+    THIRD_PARTY_PATTERN.test(sentence),
+  );
 
-  if (CREDENTIAL_REQUEST_PATTERN.test(customerReply)) {
-    return appendSafetyWarning(cleaned);
+  const replacedRefundPromises = replaceRefundPromises(
+    safeSentences.join(" "),
+  );
+  let cleaned = normalizeWhitespace(replacedRefundPromises);
+
+  if (hadCredentialRequest) {
+    cleaned = appendSentence(cleaned, SAFE_CREDENTIAL_WARNING);
   }
 
-  return cleaned;
+  if (hadThirdPartyInstruction) {
+    cleaned = appendSentence(cleaned, OFFICIAL_CHANNELS_MESSAGE);
+  }
+
+  return cleaned || OFFICIAL_CHANNELS_MESSAGE;
 }
 
 export function normalizeEnumFields(
@@ -95,27 +125,42 @@ export function normalizeEnumFields(
       VALID_EVIDENCE_VERDICTS,
       "insufficient_data",
     ),
-    case_type: pickValidValue(
-      response.case_type,
-      VALID_CASE_TYPES,
-      "general_support",
-    ),
+    case_type: pickValidValue(response.case_type, VALID_CASE_TYPES, "other"),
     severity: pickValidValue(response.severity, VALID_SEVERITIES, "medium"),
     department: pickValidValue(
       response.department,
       VALID_DEPARTMENTS,
-      "support",
+      "customer_support",
     ),
   };
 }
 
-function removeCredentialRequestSentences(text: string): string {
-  const sentences = text.match(/[^.!?]+[.!?]*/g) ?? [text];
-  const safeSentences = sentences.filter(
-    (sentence) => !CREDENTIAL_REQUEST_PATTERN.test(sentence),
-  );
+export function hasCredentialRisk(text: string): boolean {
+  return CREDENTIAL_TOPIC_PATTERN.test(text);
+}
 
-  return safeSentences.join(" ");
+function requiresHumanReview(response: AnalyzeTicketResponse): boolean {
+  return (
+    response.case_type === "phishing_or_social_engineering" ||
+    response.case_type === "wrong_transfer" ||
+    response.case_type === "duplicate_payment" ||
+    response.severity === "critical" ||
+    response.severity === "high" ||
+    (response.evidence_verdict === "inconsistent" &&
+      ["wrong_transfer", "refund_request", "duplicate_payment"].includes(
+        response.case_type,
+      ))
+  );
+}
+
+function isUnsafeCredentialRequest(sentence: string): boolean {
+  if (!CREDENTIAL_REQUEST_PATTERN.test(sentence)) {
+    return false;
+  }
+
+  return !/\b(?:do\s+not|don't|never|not)\s+(?:send|share|provide|enter|disclose|reveal|give|submit|tell)\b/i.test(
+    sentence,
+  );
 }
 
 function replaceRefundPromises(text: string): string {
@@ -125,18 +170,18 @@ function replaceRefundPromises(text: string): string {
   );
 }
 
-function appendSafetyWarning(text: string): string {
+function splitSentences(text: string): string[] {
+  return text.match(/[^.!?]+[.!?]*/g) ?? [text];
+}
+
+function appendSentence(text: string, sentence: string): string {
   const cleaned = normalizeWhitespace(text);
 
-  if (cleaned.length === 0) {
-    return SAFE_CREDENTIAL_WARNING;
-  }
-
-  if (cleaned.includes(SAFE_CREDENTIAL_WARNING)) {
+  if (cleaned.includes(sentence)) {
     return cleaned;
   }
 
-  return `${cleaned} ${SAFE_CREDENTIAL_WARNING}`;
+  return normalizeWhitespace(`${cleaned} ${sentence}`);
 }
 
 function normalizeWhitespace(text: string): string {
