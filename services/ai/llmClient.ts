@@ -17,7 +17,7 @@ type ChatCompletionResponse = {
 };
 
 type LlmClientConfig = {
-  apiKey?: string;
+  apiKey?: string | string[];
   apiUrl?: string;
   model?: string;
   maxRetries?: number;
@@ -29,8 +29,23 @@ const DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile";
 const DEFAULT_TIMEOUT_MS = 12_000;
 const DEFAULT_MAX_RETRIES = 1;
 
-function readLlmApiKey(config: LlmClientConfig): string | undefined {
-  return config.apiKey ?? process.env.GROQ_API_KEY;
+function readLlmApiKeys(config: LlmClientConfig): string[] {
+  let raw: string | string[];
+
+  if (Array.isArray(config.apiKey)) {
+    raw = config.apiKey.join(",");
+  } else {
+    raw =
+      config.apiKey ??
+      process.env.GROQ_API_KEY ??
+      process.env.GROQ_API_KEYS ??
+      "";
+  }
+
+  return raw
+    .split(",")
+    .map((key) => key.trim())
+    .filter((key) => key.length > 0);
 }
 
 function readLlmModel(config: LlmClientConfig): string {
@@ -46,17 +61,17 @@ function readLlmApiUrl(config: LlmClientConfig): string {
 }
 
 export function isLlmConfigured(config: LlmClientConfig = {}): boolean {
-  return Boolean(readLlmApiKey(config));
+  return readLlmApiKeys(config).length > 0;
 }
 
 export async function analyzeTicketWithAI(
   request: AnalyzeTicketRequest,
   config: LlmClientConfig = {},
 ): Promise<AnalyzeTicketResponse> {
-  const apiKey = readLlmApiKey(config);
+  const apiKeys = readLlmApiKeys(config);
   const model = readLlmModel(config);
 
-  if (!apiKey) {
+  if (apiKeys.length === 0) {
     throw new Error("LLM is not configured.");
   }
 
@@ -65,19 +80,21 @@ export async function analyzeTicketWithAI(
   const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   let lastError: unknown;
 
-  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-    try {
-      const content = await callChatCompletion({
-        apiKey,
-        apiUrl,
-        model,
-        request,
-        timeoutMs,
-      });
+  for (const apiKey of apiKeys) {
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      try {
+        const content = await callChatCompletion({
+          apiKey,
+          apiUrl,
+          model,
+          request,
+          timeoutMs,
+        });
 
-      return parseAnalyzeTicketResponse(content, request.ticket_id);
-    } catch (error) {
-      lastError = error;
+        return parseAnalyzeTicketResponse(content, request.ticket_id);
+      } catch (error) {
+        lastError = error;
+      }
     }
   }
 

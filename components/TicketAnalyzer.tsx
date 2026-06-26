@@ -5,9 +5,19 @@ import HealthStatus from "@/components/HealthStatus";
 import TransactionRow from "@/components/TransactionRow";
 import AnalysisResult from "@/components/AnalysisResult";
 import { analyzeTicket, AnalysisError } from "@/lib/frontend-api";
-import type { AnalyzeTicketRequest, AnalyzeTicketResponse, TransactionHistoryItem } from "@/schemas/apiContract";
+import type {
+  AnalyzeTicketRequest,
+  AnalyzeTicketResponse,
+  TransactionHistoryItem,
+  transactionTypeSchema,
+  transactionStatusSchema,
+} from "@/schemas/apiContract";
+import type { z } from "zod";
 
 type LocalTransactionItem = TransactionHistoryItem & { localTime?: string };
+
+type SampleTransactionType = z.infer<typeof transactionTypeSchema>;
+type SampleTransactionStatus = z.infer<typeof transactionStatusSchema>;
 
 type SampleComplaint = {
   id: string;
@@ -18,9 +28,14 @@ type SampleComplaint = {
   channel: string;
   userType: string;
   complaint: string;
-  transactions: Array<
-    Omit<LocalTransactionItem, "localTime"> & { localTime: string }
-  >;
+  transactions: Array<{
+    transaction_id: string;
+    localTime: string;
+    type: SampleTransactionType;
+    amount: number;
+    counterparty: string;
+    status: SampleTransactionStatus;
+  }>;
 };
 
 const SAMPLE_COMPLAINTS: SampleComplaint[] = [
