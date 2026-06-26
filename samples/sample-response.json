@@ -1,0 +1,17 @@
+{
+    "ticket_id": "TKT-010",
+    "relevant_transaction_id": "TXN-10002",
+    "evidence_verdict": "consistent",
+    "case_type": "duplicate_payment",
+    "severity": "high",
+    "department": "payments_ops",
+    "agent_summary": "Customer claims duplicate payment of electricity bill, transaction history shows two identical payments within a short time frame.",
+    "recommended_next_action": "Investigate with the biller to determine if the duplicate payment was an error and consider refunding the excess amount if necessary.",
+    "customer_reply": "Please look into this matter and refund the extra amount if I was charged incorrectly.",
+    "human_review_required": true,
+    "confidence": 0.92,
+    "reason_codes": [
+        "duplicate_payment",
+        "biller_verification_required"
+    ]
+}
