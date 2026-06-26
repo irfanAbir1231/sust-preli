@@ -58,12 +58,16 @@ function enforceEvidenceGrounding(
 
   const best = scored[0];
   const second = scored[1];
+  const selectedScore =
+    scored.find((transaction) => transaction.id === selectedId)?.score ?? 0;
 
   if (
     !best ||
-    best.id !== selectedId ||
-    best.score < 3 ||
-    (second && best.score - second.score < 2)
+    (best.id !== selectedId && response.case_type !== "duplicate_payment") ||
+    selectedScore < 3 ||
+    (second &&
+      best.score - second.score < 2 &&
+      response.case_type !== "duplicate_payment")
   ) {
     return {
       ...response,
@@ -96,9 +100,13 @@ function scoreTransactionMatch(
     score += 3;
   }
 
+  if (transaction.type === "cash_in" && /cash\s*in|cashin|ক্যাশ/.test(normalizedComplaint)) {
+    score += 3;
+  }
+
   for (const field of ["type", "counterparty", "status"] as const) {
     const value = transaction[field];
-    if (value && normalizedComplaint.includes(value.toLowerCase())) {
+    if (value && normalizedComplaint.includes(value.toLowerCase().replace("_", " "))) {
       score += 2;
     }
   }
@@ -114,7 +122,17 @@ function scoreTransactionMatch(
 }
 
 function extractAmounts(text: string): number[] {
-  return Array.from(text.matchAll(/\d+(?:\.\d+)?/g), ([match]) =>
+  const normalized = normalizeBanglaDigits(text);
+
+  return Array.from(normalized.matchAll(/\d+(?:\.\d+)?/g), ([match]) =>
     Number(match),
   ).filter(Number.isFinite);
+}
+
+function normalizeBanglaDigits(text: string): string {
+  const banglaDigits = "০১২৩৪৫৬৭৮৯";
+
+  return text.replace(/[০-৯]/g, (digit) =>
+    String(banglaDigits.indexOf(digit)),
+  );
 }

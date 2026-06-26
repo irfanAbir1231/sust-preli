@@ -54,7 +54,7 @@ function classifyComplaint(complaint: string): Classification {
     };
   }
 
-  if (/wrong|mistake|mistaken|sent.*wrong|ভুল/.test(text)) {
+  if (isWrongTransferComplaint(text)) {
     return {
       caseType: "wrong_transfer",
       department: "dispute_resolution",
@@ -70,11 +70,19 @@ function classifyComplaint(complaint: string): Classification {
     };
   }
 
+  if (/failed|fail|pending|declined|timeout|deducted|কেটে|ব্যর্থ/.test(text)) {
+    return {
+      caseType: "payment_failed",
+      department: "payments_ops",
+      severity: "high",
+    };
+  }
+
   if (/refund|return|reversal|ফেরত/.test(text)) {
     return {
       caseType: "refund_request",
-      department: "dispute_resolution",
-      severity: "medium",
+      department: "customer_support",
+      severity: "low",
     };
   }
 
@@ -86,19 +94,11 @@ function classifyComplaint(complaint: string): Classification {
     };
   }
 
-  if (/agent|cash\s*in|cashin|ক্যাশ/.test(text)) {
+  if (/agent|cash\s*in|cashin|এজেন্ট|ক্যাশ/.test(text)) {
     return {
       caseType: "agent_cash_in_issue",
       department: "agent_operations",
-      severity: "medium",
-    };
-  }
-
-  if (/failed|fail|pending|declined|timeout|ব্যর্থ/.test(text)) {
-    return {
-      caseType: "payment_failed",
-      department: "payments_ops",
-      severity: "medium",
+      severity: "high",
     };
   }
 
@@ -116,6 +116,12 @@ function findClearRelevantTransaction(
 
   if (history.length === 0) {
     return null;
+  }
+
+  const classification = classifyComplaint(request.complaint);
+
+  if (classification.caseType === "duplicate_payment") {
+    return findDuplicateTransaction(history);
   }
 
   const scored = history
@@ -157,6 +163,10 @@ function inferEvidenceVerdict(
     return "inconsistent";
   }
 
+  if (isWrongTransferComplaint(complaint) && hasEstablishedRecipientPattern(request, transaction)) {
+    return "inconsistent";
+  }
+
   return "consistent";
 }
 
@@ -181,9 +191,13 @@ function scoreTransaction(
     score += 3;
   }
 
+  if (transaction.type === "cash_in" && /cash\s*in|cashin|ক্যাশ/.test(text)) {
+    score += 3;
+  }
+
   for (const field of ["type", "counterparty", "status"] as const) {
     const value = transaction[field];
-    if (value && text.includes(value.toLowerCase())) {
+    if (value && text.includes(value.toLowerCase().replace("_", " "))) {
       score += 2;
     }
   }
@@ -192,9 +206,71 @@ function scoreTransaction(
 }
 
 function extractAmounts(text: string): number[] {
-  return Array.from(text.matchAll(/\d+(?:\.\d+)?/g), ([match]) =>
+  const normalized = normalizeBanglaDigits(text);
+
+  return Array.from(normalized.matchAll(/\d+(?:\.\d+)?/g), ([match]) =>
     Number(match),
   ).filter(Number.isFinite);
+}
+
+function isWrongTransferComplaint(text: string): boolean {
+  return (
+    /sent\b.*\bwrong|wrong\s+(?:number|person|recipient)|mistake|mistaken|didn'?t\s+get|did not get|he says he didn'?t get|ভুল/.test(
+      text,
+    ) && !/^something is wrong\b/.test(text)
+  );
+}
+
+function findDuplicateTransaction(
+  history: NonNullable<AnalyzeTicketRequest["transaction_history"]>,
+): string | null {
+  const groups = new Map<string, typeof history>();
+
+  for (const transaction of history) {
+    if (
+      !transaction.transaction_id ||
+      typeof transaction.amount !== "number" ||
+      !transaction.counterparty ||
+      !transaction.type
+    ) {
+      continue;
+    }
+
+    const key = `${transaction.amount}:${transaction.counterparty ?? ""}:${transaction.type ?? ""}`;
+    groups.set(key, [...(groups.get(key) ?? []), transaction]);
+  }
+
+  for (const duplicates of groups.values()) {
+    if (duplicates.length > 1) {
+      return duplicates[duplicates.length - 1]?.transaction_id ?? null;
+    }
+  }
+
+  return null;
+}
+
+function hasEstablishedRecipientPattern(
+  request: AnalyzeTicketRequest,
+  transaction: NonNullable<AnalyzeTicketRequest["transaction_history"]>[number],
+): boolean {
+  if (!transaction.counterparty) {
+    return false;
+  }
+
+  const sameCounterparty =
+    request.transaction_history?.filter(
+      (item) => item.counterparty === transaction.counterparty,
+    ) ?? [];
+
+  return sameCounterparty.length >= 3;
+}
+
+function normalizeBanglaDigits(text: string): string {
+  const banglaDigits = "০১২৩৪৫৬৭৮৯";
+
+  return text.replace(/[০-৯]/g, (digit) =>
+    String(banglaDigits.indexOf(digit)),
+  );
 }
 
 function buildAgentSummary(

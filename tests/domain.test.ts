@@ -12,7 +12,7 @@ const sampleCases: Array<{
 }> = [
   ["Sent money to wrong number", "wrong_transfer", "dispute_resolution"],
   ["Payment failed but amount debited", "payment_failed", "payments_ops"],
-  ["Need refund for my order", "refund_request", "dispute_resolution"],
+  ["Need refund for my order", "refund_request", "customer_support"],
   ["Charged duplicate twice", "duplicate_payment", "payments_ops"],
   ["Merchant settlement is delayed", "merchant_settlement_delay", "merchant_operations"],
   ["Agent cash in issue", "agent_cash_in_issue", "agent_operations"],
